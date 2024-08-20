@@ -88,20 +88,27 @@ async def get_current_user(
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
-        token_data = TokenData(username)
+        token_data = TokenData(username=username)
+
+        if token_data.username is None:
+            raise credentials_exception
+
     except InvalidTokenError:
         raise credentials_exception
-    user = crud.get_user_by_username(db, user_username=token_data.username)
+
+    user = crud.get_user_by_username(db, token_data.username)
+
     if user is None:
         raise credentials_exception
+
     return user
 
 
 async def get_current_active_user(
     current_user: Annotated[schemas.User, Depends(get_current_user)],
 ):
-    if current_user.disabled:
-        raise HTTPException(status_code=400, detail="Inactive user")
+    # if current_user.disabled:
+    #     raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
 
@@ -115,7 +122,7 @@ async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Session = Depends(get_db),
 ) -> Token:
-    user = authenticate_user(db, form_data.username, form_data.password)
+    user = authenticate_user(form_data.username, form_data.password, db)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -141,10 +148,13 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user_email = crud.get_user_by_email(db, user.email)
     db_user_username = crud.get_user_by_username(db, user.username)
 
-    if db_user_email:
+    if db_user_email is not None:
         raise HTTPException(status_code=400, detail="Email already registered")
-    if db_user_username:
+    if db_user_username is not None:
         raise HTTPException(status_code=400, detail="Username already registered")
+
+    user.password = get_password_hash(user.password)
+
     return crud.create_user(db=db, user=user)
 
 
