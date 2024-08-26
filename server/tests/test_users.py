@@ -1,55 +1,3 @@
-import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from .main import app, get_db
-from .database import Base
-from datetime import timedelta
-import jwt
-
-# Use an in-memory SQLite database for tests
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-
-# Create a test database engine
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-@pytest.fixture(scope="function")
-def db_session():
-    # Create the tables
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        # Drop the tables after the test runs
-        Base.metadata.drop_all(bind=engine)
-        db.close()
-
-
-@pytest.fixture(scope="function")
-def client(db_session):
-    # Override the dependency to use the test session
-    def override_get_db():
-        try:
-            yield db_session
-        finally:
-            db_session.close()
-
-    app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
-    app.dependency_overrides = {}
-
-
-def test_ping(client):
-    response = client.get("/ping")
-    assert response.status_code == 200
-    assert response.json() == "pong"
-
-
 def test_create_user(client):
     new_user = {
         "email": "testuser@example.com",
@@ -174,59 +122,6 @@ def test_create_existing_email(client):
     assert response.json() == {"detail": "Email already registered"}
 
 
-def test_login(client, db_session):
-    # Create a user for authentication test
-    new_user = {
-        "email": "testuser@example.com",
-        "username": "testuser",
-        "password": "TestPassword123!",
-    }
-    client.post("/users/", json=new_user)
-
-    # Test successful login
-    response = client.post(
-        "/token",
-        data={"username": "testuser", "password": "TestPassword123!"},
-    )
-    assert response.status_code == 200
-    token_data = response.json()
-    assert "access_token" in token_data
-    assert token_data["token_type"] == "bearer"
-
-    # Test failed login
-    response = client.post(
-        "/token",
-        data={"username": "testuser", "password": "WrongPassword123!"},
-    )
-    assert response.status_code == 401
-    assert response.json() == {"detail": "Incorrect username or password"}
-
-
-def test_read_users_me(client, db_session):
-    # Create a user
-    new_user = {
-        "email": "testuser@example.com",
-        "username": "testuser",
-        "password": "TestPassword123!",
-    }
-    client.post("/users/", json=new_user)
-
-    # Get a token
-    response = client.post(
-        "/token",
-        data={"username": "testuser", "password": "TestPassword123!"},
-    )
-    token_data = response.json()
-    headers = {"Authorization": f"Bearer {token_data['access_token']}"}
-
-    # Access the /users/me/ endpoint
-    response = client.get("/users/me/", headers=headers)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["username"] == "testuser"
-    assert data["email"] == "testuser@example.com"
-
-
 def test_read_users(client):
     # Create users
     users = [
@@ -234,7 +129,7 @@ def test_read_users(client):
         {"email": "user2@example.com", "username": "user2", "password": "Password123!"},
     ]
     for user in users:
-        client.post("/users/", json=user)
+        client.post("/users", json=user)
 
     # Access the /users/ endpoint
     response = client.get("/users/")
@@ -266,3 +161,30 @@ def test_read_user(client):
     response = client.get("/users/9999")
     assert response.status_code == 404
     assert response.json() == {"detail": "User not found"}
+
+
+def test_read_users_me(client, db_session):
+    # Create a user
+    new_user = {
+        "email": "testuser@example.com",
+        "username": "testuser",
+        "password": "TestPassword123!",
+    }
+    client.post("/users", json=new_user)
+
+    # Get a token
+    response = client.post(
+        "/auth/token",
+        data={"username": "testuser", "password": "TestPassword123!"},
+    )
+    token_data = response.json()
+    assert "access_token" in token_data
+    headers = {"Authorization": f"Bearer {token_data['access_token']}"}
+
+    # Access the /users/me/ endpoint
+    response = client.get("/users/me", headers=headers)
+    print("Response Text:", response.text)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["username"] == "testuser"
+    assert data["email"] == "testuser@example.com"

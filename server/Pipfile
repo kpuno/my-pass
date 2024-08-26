@@ -6,6 +6,8 @@ name = "pypi"
 [packages]
 fastapi = {extras = ["all"], version = "*"}
 sqlalchemy = "*"
+pyjwt = {extras = ["crypto"], version = "*"}
+cryptography = "*"
 
 [dev-packages]
 httpx = "*"
